@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Flying Dragon — Simple HTML5 Game</title>
+  <style>
+    :root{--bg:#7ec8ff;--ground:#2d8b3a}
+    html,body{Height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial}
+    #gameWrap{display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px}
+    canvas{background:linear-gradient(#8fd1ff,#6bb7ff);border-radius:12px;display:block;touch-action:none}
+    .ui{display:flex;gap:8px;align-items:center}
+    button{padding:8px 12px;border-radius:8px;border:0;background:#ff8a00;color:white;font-weight:600}
+    .info{font-size:14px;color:#094;}
+    .score{font-size:18px;font-weight:700;color:#063}
+    @media(min-width:900px){canvas{width:640px;height:480px}}
+  </style>
+</head>
+<body>
+  <div id="gameWrap">
+    <h2>Flying Dragon (Udne wala dragon) — Tap/Space to flap</h2>
+    <canvas id="c" width="480" height="640"></canvas>
+    <div class="ui">
+      <div class="score">Score: <span id="score">0</span></div>
+      <button id="startBtn">Start / Restart</button>
+      <div class="info">Tap screen or press <b>Space</b> to make the dragon fly</div>
+    </div>
+    <small style="color:#666">This is a single-file HTML5 game. Open in mobile browser or wrap in WebView to make an APK.</small>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  let running = false;
+
+  // Game state
+  const state = {
+    dragon: {x: 90, y: H/2, r: 24, vel: 0},
+    gravity: 0.55,
+    flapPower: -10.5,
+    pipes: [],
+    pipeGap: 150,
+    pipeW: 56,
+    pipeSpacing: 190,
+    frame: 0,
+    score: 0,
+    best: 0
+  };
+
+  // Resize for high-dpi
+  function fixDPI(){
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  fixDPI();
+
+  function reset(){
+    state.dragon.y = H/2;
+    state.dragon.vel = 0;
+    state.pipes = [];
+    state.frame = 0;
+    state.score = 0;
+    running = true;
+    spawnInitialPipes();
+    document.getElementById('score').textContent = '0';
+  }
+
+  function spawnInitialPipes(){
+    state.pipes = [];
+    let x = W + 40;
+    for(let i=0;i<3;i++){
+      addPipe(x);
+      x += state.pipeSpacing;
+    }
+  }
+
+  function addPipe(x){
+    const minTop = 60;
+    const maxTop = H - state.pipeGap - 120;
+    const topH = minTop + Math.random() * (Math.max(0, maxTop - minTop));
+    state.pipes.push({x: x, top: topH, passed: false});
+  }
+
+  function flap(){
+    if(!running) return;
+    state.dragon.vel = state.flapPower;
+  }
+
+  function update(){
+    if(!running) return;
+    state.frame++;
+    // Physics
+    state.dragon.vel += state.gravity;
+    state.dragon.y += state.dragon.vel;
+
+    // Floor and ceiling collisions
+    if(state.dragon.y + state.dragon.r > H - 30){
+      state.dragon.y = H - 30 - state.dragon.r;
+      gameOver();
+    }
+    if(state.dragon.y - state.dragon.r < 0){
+      state.dragon.y = state.dragon.r;
+      state.dragon.vel = 0;
+    }
+
+    // Move pipes
+    for(let p of state.pipes){
+      p.x -= 2.6;
+      // when offscreen, recycle
+      if(p.x + state.pipeW < -20){
+        // find rightmost
+        const mx = Math.max(...state.pipes.map(z=>z.x));
+        p.x = mx + state.pipeSpacing;
+        p.top = 60 + Math.random() * (H - state.pipeGap - 160);
+        p.passed = false;
+      }
+      // scoring
+      if(!p.passed && p.x + state.pipeW < state.dragon.x - 8){
+        p.passed = true;
+        state.score++;
+        document.getElementById('score').textContent = state.score;
+      }
+    }
+
+    // spawn more pipes occasionally
+    if(state.frame % 100 === 0){
+      const last = Math.max(...state.pipes.map(z=>z.x));
+      addPipe(last + state.pipeSpacing);
+    }
+
+    // Collisions
+    for(let p of state.pipes){
+      // top pipe rect: x..x+pipeW, y:0..p.top
+      // bottom pipe rect: x..x+pipeW, y:p.top+gap..H
+      const pipeX1 = p.x, pipeX2 = p.x + state.pipeW;
+      if(circleRectCollision(state.dragon.x, state.dragon.y, state.dragon.r, pipeX1, 0, state.pipeW, p.top) ||
+         circleRectCollision(state.dragon.x, state.dragon.y, state.dragon.r, pipeX1, p.top + state.pipeGap, state.pipeW, H)){
+        gameOver();
+      }
+    }
+  }
+
+  function circleRectCollision(cx, cy, r, rx, ry, rw, rh){
+    const closestX = clamp(cx, rx, rx + rw);
+    const closestY = clamp(cy, ry, ry + rh);
+    const dx = cx - closestX;
+    const dy = cy - closestY;
+    return (dx*dx + dy*dy) < (r*r);
+  }
+  function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+
+  function gameOver(){
+    running = false;
+    state.best = Math.max(state.best, state.score);
+    // show overlay
+    setTimeout(()=>{
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(0,0,W,H);
+      ctx.fillStyle = '#fff';
+      ctx.font = '22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Game Over', W/2, H/2 - 8);
+      ctx.font = '16px sans-serif';
+      ctx.fillText('Score: ' + state.score + '   Best: ' + state.best, W/2, H/2 + 18);
+      ctx.fillText('Press Start / Tap to try again', W/2, H/2 + 48);
+    }, 40);
+  }
+
+  function drawDragon(x,y,r,angle){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.rotate(angle);
+    // body
+    ctx.beginPath();
+    ctx.ellipse(0,0,r*1.1,r*0.75,0,0,Math.PI*2);
+    ctx.fillStyle = '#d14f2a';
+    ctx.fill();
+    // wing
+    ctx.beginPath();
+    ctx.moveTo(-r*0.2,0);
+    ctx.quadraticCurveTo(-r*1.8,-r*1.1, -r*0.6,-r*0.8);
+    ctx.quadraticCurveTo(-r*0.4,-r*0.4, -r*0.2,0);
+    ctx.fillStyle = '#ffb86b';
+    ctx.fill();
+    // tail
+    ctx.beginPath();
+    ctx.moveTo(-r*1.1, r*0.1);
+    ctx.lineTo(-r*1.9, r*0.6);
+    ctx.lineTo(-r*1.1, r*0.4);
+    ctx.fillStyle = '#d14f2a';
+    ctx.fill();
+    // eye
+    ctx.beginPath();
+    ctx.arc(r*0.5, -r*0.15, r*0.14, 0, Math.PI*2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(r*0.56, -r*0.15, r*0.06, 0, Math.PI*2);
+    ctx.fillStyle = '#000';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function draw(){
+    // background gradient
+    ctx.clearRect(0,0,W,H);
+
+    // sky gradient (already background) - optional clouds
+    drawClouds();
+
+    // pipes
+    for(let p of state.pipes){
+      // top
+      ctx.fillStyle = '#2e8b57';
+      ctx.fillRect(p.x, 0, state.pipeW, p.top);
+      // cap
+      ctx.fillStyle = '#1f6b3f';
+      ctx.fillRect(p.x - 6, p.top - 12, state.pipeW + 12, 12);
+      // bottom
+      ctx.fillStyle = '#2e8b57';
+      ctx.fillRect(p.x, p.top + state.pipeGap, state.pipeW, H);
+      ctx.fillStyle = '#1f6b3f';
+      ctx.fillRect(p.x - 6, p.top + state.pipeGap, state.pipeW + 12, 12);
+    }
+
+    // ground strip
+    ctx.fillStyle = '#2b7a31';
+    ctx.fillRect(0, H - 28, W, 28);
+
+    // dragon rotation by velocity
+    const angle = Math.max(-0.7, Math.min(0.8, state.dragon.vel * 0.04));
+    drawDragon(state.dragon.x, state.dragon.y, state.dragon.r, angle);
+
+    // HUD handled by DOM
+  }
+
+  // clouds
+  const clouds = Array.from({length:6}, (_,i)=>({x: Math.random()*W, y: 30 + Math.random()*140, s: 18+Math.random()*28}));
+  function drawClouds(){
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    for(let c of clouds){
+      c.x -= 0.25;
+      if(c.x < -80) c.x = W + 60;
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, c.s, c.s*0.6, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(c.x + c.s*0.7, c.y + 6, c.s*0.7, c.s*0.45, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  // main loop
+  function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // input
+  function startPress(){
+    if(!running) reset();
+    flap();
+  }
+
+  // pointer/touch
+  canvas.addEventListener('pointerdown', (e)=>{ e.preventDefault(); startPress(); });
+  // keyboard
+  window.addEventListener('keydown', (e)=>{ if(e.code === 'Space') { e.preventDefault(); startPress(); } });
+
+  document.getElementById('startBtn').addEventListener('click', ()=>{ reset(); });
+
+  // kick off
+  reset();
+  loop();
+
+  // Helpful: allow pausing when tab hidden
+  document.addEventListener('visibilitychange', ()=>{ if(document.hidden) running = false; });
+
+  // simple save best score in localStorage
+  window.addEventListener('beforeunload', ()=>{ localStorage.setItem('dragon_best', state.best); });
+  const saved = localStorage.getItem('dragon_best'); if(saved) state.best = parseInt(saved,10) || 0;
+
+})();
+</script>
+</body>
+</html>
